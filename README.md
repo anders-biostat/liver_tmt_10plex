@@ -10,3 +10,5 @@ TMT 10plex proteomics project from the Klingmueller group (DKFZ), 80 mice were f
 - `MSnbase.Rmd` -- R Notebook, quantile normalization with the MSn package and following analysis
 - `MSnbase.nb` -- HMTL Notebook version of the above mentioned R Notebook
 - `calc_density.R` -- R Script, function to calculate neighbourhood density (with Rcpp) and example code to execute the function on
+
+You can find the peptides.txt table, protein tables and the TMT randomisation scheme on the bioinform5: /mnt/Data/Anders_group/u/annika/ZMBH
