@@ -1,0 +1,423 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+```{r}
+library(readr)
+library(readxl)
+library(tidyverse)
+library(pheatmap)
+library(RColorBrewer)
+library(limma)
+library(XML)
+library(genefilter)
+library(cowplot)
+library(vsn)
+library(MSnbase)
+library(Rcpp)
+library(rje)
+library(vioplot)
+library(RcppArmadillo)
+```
+
+First step: load the data (Peptides table and TMT_10plex_randomisation)
+```{r}
+
+peptides <- read_delim("C:/Users/Annika/ZMBH/peptides.txt", 
+    "\t", escape_double = FALSE, trim_ws = TRUE)
+head(peptides)
+
+
+assignment_mice <- read_excel("C:/Users/Annika/ZMBH/TMT_10plex randomisation-1.xlsx", 
+    range = "I14:S25")
+head(assignment_mice)
+
+
+```
+
+Prepare the data for working with it
+```{r}
+assignment_mice=assignment_mice %>%
+  filter( row_number() != 1 ) %>%
+  rename( tag = X__1 ) %>%
+  rename( tag_idx = `name in data table` ) %>%
+  gather( run, sample, starts_with("TMT") ) %>%
+  mutate( tag_idx = as.integer(tag_idx) ) %>%
+  mutate( diet = str_extract( sample, "^(SD|WD)" ) ) %>%
+  mutate( mouse = str_extract( sample, "M\\d$" ) ) %>%
+  mutate( weeks = str_extract( sample, "(?<=^.._).*(?=_M.)" ) ) %>%
+  mutate( weeksSD =  str_extract( weeks, "^\\d+" ) %>% as.integer ) %>%
+  mutate( weeksWD =  str_extract( weeks, "(?<=_)\\d+" ) %>% as.integer) %>%
+  mutate( weeksWD = ifelse( diet=="SD", 0, weeksWD ) %>% as.integer) %>%
+  mutate( pept_tbl_col = str_c( tag_idx, " ", run ) ) %>%
+  mutate( age = weeksSD+weeksWD )
+
+  assignment_mice
+
+```
+
+
+```{r}
+peptides<-rownames_to_column(peptides)
+peptides<-rename(peptides,index=rowname)
+
+peptides_corr=peptides %>%
+  select(starts_with("Reporter intensity corrected")) %>%
+  select(contains("TMT")) %>%
+  rename_all(str_replace,"Reporter intensity corrected ", "")  %>%
+  select(-contains("0"))
+peptides_corr[peptides_corr==0]=NA
+peptides_corr=as.matrix(peptides_corr)
+  
+peptides_corr[1:5,1:5]
+```
+
+Peptides table with pools
+```{r}
+peptides_corr_p=peptides %>%
+  select(starts_with("Reporter intensity corrected")) %>%
+  select(contains("TMT")) %>%
+  rename_all(str_replace,"Reporter intensity corrected ", "")  
+peptides_corr_p[peptides_corr_p==0]=NA
+peptides_corr_p=as.matrix(peptides_corr_p)
+
+mf_p <- assignment_mice
+samples <- c("3 TMT2", "5 TMT7", "2 TMT5", "4 TMT2", "2 TMT9", "1 TMT5")
+idx_p <- match(samples, mf_p$pept_tbl_col)
+
+mf_p$processing <- rep("01/24",length(mf_p$tag_idx))
+mf_p$processing[idx_p] <- "01/10"
+mf_p$processing[mf_p$age==34] <- "02/12"
+mf_p$processing[mf_p$sample=="Pool"] <- "02/12"
+mf_p$processing[mf_p$age==32] <- "02/08"
+mf_p$processing[mf_p$age==30] <- "02/08"
+mf_p$processing[mf_p$age==4] <- "01/22"
+mf_p$processing[mf_p$age==6] <- "01/22"
+mf_p$processing[mf_p$age==8] <- "01/22"
+mf_p$processing[mf_p$age==10] <- "01/22"
+mf_p$processing[mf_p$age==12] <- "01/22"
+mf_p$processing[mf_p$age==14 & mf_p$weeksWD==0] <- "01/22"
+mf_p$processing[mf_p$age==16 & mf_p$weeksWD==0] <- "01/22"
+mf_p$processing[mf_p$age==18 & mf_p$weeksWD==0] <- "01/22"
+mf_p$processing[mf_p$age==20 & mf_p$weeksWD==0] <- "01/22"
+mf_p$processing[mf_p$age==22 & mf_p$weeksWD==0] <- "01/22"
+mf_p$processing[mf_p$age==12 & mf_p$weeksWD==8] <- "01/22"
+mf_p$processing[mf_p$age==16 & mf_p$weeksWD==12] <- "01/22"
+mf_p$processing[mf_p$age==20 & mf_p$weeksWD==16] <- "01/22"
+```
+
+
+Compare different pools
+
+```{r}
+pept_pool=peptides %>%
+  select(starts_with("Reporter intensity corrected")) %>%
+  select(contains("TMT")) %>%
+  rename_all(str_replace,"Reporter intensity corrected ", "")  %>%
+  select(contains("0"))
+pept_pool[pept_pool==0]=NA
+pept_pool=as.matrix(pept_pool)
+pept_pool[1:5,1:5]
+```
+
+
+```{r}
+plot(x=log10(1+pept_pool[,2]), y= log10(1+pept_pool[,9]), pch=".", asp=1)
+
+```
+
+
+Plot random peptide (number 9 in Peptides table)
+```{r}
+y <- as.matrix(peptides_corr)[9,]
+mf <- assignment_mice[assignment_mice$sample!="Pool",]
+ggplot( cbind( mf, y ) ) +
+geom_jitter( aes( x=weeksWD/(weeksSD+weeksWD), y=log10(y), col=weeksSD+weeksWD ), size=3) +
+scale_color_gradientn( colors=rje::cubeHelix(10) )
+```
+
+Plot random peptide (number 42 in Peptides table)
+```{r}
+y <- as.matrix(peptides_corr)[42,]
+ggplot( cbind( mf, y ) ) +
+geom_jitter( aes( y=log10(y), x=weeksWD/(weeksSD+weeksWD), col=weeksSD+weeksWD ), size=3) +
+scale_color_gradientn( colors=rje::cubeHelix(10) )
+```
+
+
+Create linear models with factors
+```{r}
+mf <- assignment_mice[assignment_mice$sample!="Pool",]
+anova(
+lm( log(y) ~ run + factor(age), mf ),
+lm( log(y) ~ run + factor(age) + factor(weeksWD), mf ) )
+```
+
+
+Create a linear model and calculate p values for first 1000 peptides and plot the corresponding histogramm
+```{r}
+p_values=rep(NA,1000)
+
+for(i in 1:1000){
+ if (sum(is.na(peptides_corr[i,]))<69){
+  y <- as.matrix(peptides_corr)[i,]
+  mf <- assignment_mice[assignment_mice$sample!="Pool",]
+
+  a=anova( 
+    lm( log(y) ~ run + factor(age), mf ),
+    lm( log(y) ~ run + factor(age) + factor(weeksWD), mf ) )
+  p_values[i]=a$`Pr(>F)`[2]}
+}
+hist(p_values)
+```
+
+
+
+
+Create model matrix, linear model, select peptide 3515 and plot it
+```{r}
+mm=model.matrix( ~ run + factor(age) + factor(weeksWD), assignment_mice )
+fit=lmFit(peptides_corr,mm)
+topTable(eBayes(fit),coef=24:28)
+y <- as.matrix(peptides_corr)[3515,]
+mf <- assignment_mice[assignment_mice$sample!="Pool",]
+ggplot( cbind( mf, y ) ) +
+geom_jitter( aes( y=log10(y), x=weeksWD/(weeksSD+weeksWD), col=weeksSD+weeksWD ), size=3) +
+scale_color_gradientn( colors=rje::cubeHelix(10) )
+```
+
+
+
+```{r}
+m <- log2(peptides_corr)[,1] - rowMeans(log2(peptides_corr))
+plot( rowMeans(log2(peptides_corr)), m-median(m,na.rm=TRUE), pch=".")
+abline(h=0)
+```
+
+```{r}
+m <- rowMeans(log2(peptides_corr),na.rm = TRUE)
+pept_norm <- apply( log2(peptides_corr), 2, function(x) x - median( x - m, na.rm=TRUE ) )
+
+pept_norm[1:5,1:5]
+```
+
+```{r}
+plot( m, pept_norm[,17] - m, pch="." )
+```
+
+
+ 
+```{r}
+y <- as.matrix(pept_norm)[22751,]
+mf <- assignment_mice[assignment_mice$sample!="Pool",]
+ggplot( cbind( mf, y ) ) +
+  geom_jitter( aes( x=weeksWD/(weeksSD+weeksWD), y=y, col=weeksSD+weeksWD ), size=3) +
+  scale_color_gradientn( colors=rje::cubeHelix(10) ) 
+ggplot( cbind( mf, y ) ) +
+  geom_jitter( aes( x=weeksSD+weeksWD, y=log10(y), col=weeksWD/(weeksSD+weeksWD) ), size=3) +
+  scale_color_gradientn( colors=rje::cubeHelix(10) ) 
+```
+
+
+```{r}
+fit = eBayes( lmFit( pept_norm, mm ) )
+tt=topTable(fit,coef=24:28,number = Inf)
+head(tt)
+hist(tt$P.Value)
+```
+
+```{r}
+meanWD <- rowMeans( coef(fit)[,24:28] )
+
+plot( rowMeans(pept_norm), meanWD, pch="." )
+abline(h=0, col="#0000FF30", lwd=4)
+```
+
+```{r}
+hist( meanWD, 30 )
+```
+
+```{r}
+
+contrastvector=cbind( c(rep(0,23),rep(1/5,5)) )
+fit2 <- contrasts.fit(fit,contrastvector)
+```
+
+
+Auff?lliges Protein
+```{r}
+y <- as.matrix(pept_norm)[22751,]
+mf <- assignment_mice[assignment_mice$sample!="Pool",]
+ggplot( cbind( mf, y ) ) +
+geom_jitter( aes( y=y, x=weeksWD/(weeksSD+weeksWD), col=weeksSD+weeksWD ), size=3) +
+scale_color_gradientn( colors=rje::cubeHelix(10) )
+peptides[22751,"Protein names"]
+peptides[22751,"Gene names"]
+```
+
+
+create lists of all proteins and genes with the highest and lowest LFC
+```{r}
+a=rownames(topTable(fit2, number=40000, lfc=1))
+a=as.numeric(a)
+pept_filtered=peptides[a,]
+pept_filtered2=cbind(pept_filtered,topTable(fit2, number=40000, lfc=1))
+
+genenames_up=pept_filtered2[pept_filtered2$logFC>0,"Gene names"]
+write.table(unique(genenames_up),"genenames_up",row.names=FALSE,quote=FALSE)
+
+genenames_down=pept_filtered2[pept_filtered2$logFC<0,"Gene names"]
+write.table(unique(genenames_down),"genenames_down",row.names=FALSE,quote=FALSE)
+
+write.table(unique(peptides[,"Gene names"]),"genenames",row.names=FALSE,quote=FALSE)
+
+write.table(unique(peptides[,"Leading razor protein"]),"proteins",row.names=FALSE,quote=FALSE)
+```
+
+```{r}
+assignment_mice1<-assignment_mice[assignment_mice$sample!="Pool",]%>%
+  group_by(age,weeksWD) %>%
+  summarise(run = paste(run, collapse = ", "))%>%
+  spread(weeksWD,run)
+```
+
+Plot heatmap
+```{r}
+
+mf <- assignment_mice[assignment_mice$sample!="Pool",]
+y <- as.matrix(pept_norm)[30386,]
+peptide_beta=lm( log(y) ~ run + paste(age, weeksWD), mf ) 
+
+table<-peptide_beta$coefficients %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "age") %>%
+  filter( str_detect(age,"paste") ) %>%
+  mutate( age=str_replace(age,fixed("paste(age, weeksWD)"),"") ) %>%
+  mutate( weeksWD=str_extract(age,"(?<= )\\d\\d?") ) %>%
+  mutate( age=str_extract(age,"\\d?\\d(?= )") ) %>% 
+  mutate( weeksWD = as.integer(weeksWD) ) %>%
+  mutate( age = as.integer(age) ) 
+table<-rename(table,coeff=.)
+
+table_heatmap=spread(table,weeksWD,coeff) %>%
+  column_to_rownames(var="age") %>% 
+  as.matrix()
+
+max_value=max(abs(table_heatmap),na.rm=TRUE)
+pheatmap(table_heatmap, brewer.pal(11,"PuOr"), cluster_rows = FALSE, cluster_cols = FALSE, breaks=seq(-max_value, max_value, by = 2*max_value/11), na_col = "grey")
+
+
+```
+
+
+Plot heatmaps for several peptides (e.g. belonging to one protein) and save them as PDF
+```{r}
+a <- peptides[ peptides$`Leading razor protein` == "Q9CQ69",1]
+a <- as.integer( unlist( a ) )
+
+mf <- assignment_mice[assignment_mice$sample!="Pool",]
+mf$ageWD <- sprintf( "%02d %02d", mf$age,  mf$weeksWD )
+
+
+pdf(file="C:\\Users\\Annika\\ZMBH\\Plot_Q9CQ69_points.pdf")
+for (i in 1:length(a)) {
+  if ( sum(is.na(as.matrix(pept_norm)[a[i],])) < 69 ) {
+    y <- as.matrix(pept_norm)[a[i],]
+    peptide_beta=lm( log(y) ~ run + ageWD, mf ) 
+    
+    table<-peptide_beta$coefficients %>%
+      as.data.frame() %>%
+      rownames_to_column(var = "age") %>%
+      filter( str_detect(age,"ageWD") ) %>%
+      mutate( age=str_replace(age,fixed("ageWD"),"") ) %>%
+      mutate( weeksWD=str_extract(age,"(?<= )\\d\\d?") ) %>%
+      mutate( age=str_extract(age,"\\d?\\d(?= )") ) %>% 
+      mutate( weeksWD = as.integer(weeksWD) ) %>%
+      mutate( age = as.integer(age) )
+    table<-rename(table,coeff=.)
+    
+    table$age=factor(table$age,levels=seq(2,34,2))
+    table_heatmap=spread(table,weeksWD,coeff,drop=FALSE) %>%
+      column_to_rownames(var="age") %>% 
+      as.matrix()
+    
+    max_value=0.3
+    pheatmap(table_heatmap, brewer.pal(11,"PuOr"), cluster_rows = FALSE, cluster_cols = FALSE, breaks=seq(-max_value, max_value, by = 2*max_value/11), na_col = "grey")
+  }
+}
+dev.off()
+
+
+```
+
+```{r}
+a<-peptides[peptides$Proteins=="Q5SWU9",]
+a<-a[is.na(a$`First amino acid`)==FALSE,]
+a<-a$index
+a<-as.integer(a)
+length(a)
+```
+
+Calculate covariance (only for WD mice)
+```{r}
+
+m <- assignment_mice[assignment_mice$sample!="Pool",]
+m$ageWD <- sprintf( "%02d %02d", m$age,  m$weeksWD )
+mm <- model.matrix( ~ run + ageWD, m )
+
+fit <- lmFit(pept_norm,mm)
+
+coeff <- as.data.frame( fit$coefficients[,10:38] )
+coeff_WD <-  select(coeff,-ends_with("00")) %>%
+  as.matrix() %>%
+  t()
+
+a <- c( 8,8,8,12,12,12,16,16,16,20,20,20,26,26,26)
+
+coeff_cov <- cov(coeff_WD,a)
+
+pept_cov <- tibble( index = peptides$index, cov = as.vector(coeff_cov), Protein_names = peptides$`Protein names`, Gene_names = peptides$`Gene names` ) %>%
+  arrange( desc(cov) )
+```
+
+
+How many peptides belong to one protein?
+```{r}
+a <- peptides %>%
+   group_by(`Leading razor protein`) %>%
+   summarise(n_peptides=n()) %>%
+   group_by(n_peptides) %>%
+   summarise(n_protein=n())
+
+plot(a$n_peptides,a$n_protein,type="l")
+
+```
+
+read protein table and prepare it for working with it
+```{r}
+proteins <- read_delim("C:/Users/Annika/ZMBH/proteinGroups.txt","\t")
+
+proteins<-rownames_to_column(proteins)
+proteins<-rename(proteins,index=rowname)
+
+proteins_corr=proteins %>%
+  select(starts_with("Reporter intensity corrected")) %>%
+  select(contains("TMT")) %>%
+  rename_all(str_replace,"Reporter intensity corrected ", "")  %>%
+  select(-contains("0"))
+proteins_corr[proteins_corr==0]=NA
+proteins_corr=as.matrix(proteins_corr)
+  
+proteins_corr[1:5,1:5]
+```
+
+
+```{r}
+
+```
+
+

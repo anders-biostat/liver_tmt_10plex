@@ -1,0 +1,464 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Create peptides table normalized with pool-sample
+
+```{r}
+
+pept_norm_pool=peptides %>%
+  select(starts_with("Reporter intensity corrected")) %>%
+  select(contains("TMT")) %>%
+  rename_all(str_replace,"Reporter intensity corrected ", "")
+pept_norm_pool[pept_norm_pool==0]=NA
+colsA <- (2:ncol(pept_norm_pool))[(-1+(2:ncol(pept_norm_pool)))%%10!=0]
+colsB <- seq(1, ncol(pept_norm_pool), by= 10)
+pept_norm_pool[,colsA] <- pept_norm_pool[,colsA] / pept_norm_pool[,rep(colsB,each=9)]
+pept_norm_pool <- pept_norm_pool %>%
+  select(-contains("0")) %>%
+  as.matrix()
+```
+
+Create MSnSet and perform robust quantile normalization
+```{r}
+mf <- assignment_mice[assignment_mice$sample!="Pool",]
+row.names(mf) <- mf$pept_tbl_col
+pept_msn <- MSnSet(pept_norm_pool, as.data.frame(peptides[, c("index",
+  "Sequence","Proteins","Leading razor protein","Gene names","Protein names")]), 
+  as.data.frame(mf))
+pept_msn <- filterNA(pept_msn, pNA = 0)
+pept_msn <- normalise(pept_msn, "quantiles.robust")
+pept_msn1 <- normalise(pept_msn)
+```
+
+Perform quantile normalization on log-transformed data (pool not subtracted)
+```{r}
+pept_msn_corr1 <- MSnSet(peptides_corr, as.data.frame(peptides[, c("index",
+  "Sequence","Proteins","Leading razor protein","Gene names","Protein names")]), 
+  as.data.frame(mf))
+pept_msn_corr1 <- filterNA(pept_msn_corr1, pNA = 0)
+pept_msn_corr1 <- normalise(pept_msn_corr1, "quantiles.robust")
+pept_msn_corr <- log2(exprs(pept_msn_corr1)) %>%
+  as.tibble()
+colnames(pept_msn_corr) <- sprintf( "%02d %02d %05s",  pData(pept_msn_corr1)$weeksWD, pData(pept_msn_corr1)$age, pData(pept_msn_corr1)$pept_tbl_col )
+pept_msn_corr <- pept_msn_corr[,order(names(pept_msn_corr))]
+pept_msn_corr <- pept_msn_corr[,c(40:1,41:81)]
+
+ord <- order( rowMeans( pept_msn_corr[ ,41:72] ) - 
+  rowMeans( pept_msn_corr[ ,73:81] ) )
+
+batches <- as.matrix(mf[,3])
+rownames(batches) <- sprintf( "%02d %02d %05s",  mf$weeksWD, mf$age, mf$pept_tbl_col )
+batches <- as.data.frame(batches)
+max_value=max(abs(pept_msn_corr),na.rm=TRUE)
+brks <- ( seq(0, 1, length.out=50)[-1] )^1.7
+
+pheatmap( 
+       pept_msn_corr[ ord[1:300], ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+       breaks=max_value*c(-rev(brks),0,brks), na_col = "grey" , annotation_col = batches,
+       show_rownames = F)
+```
+
+
+take log2, order (SD desc(age) left, WD asc(age) right), order by difference WD/SD, plot heatmap
+column 1-40 SD, 41-47 8WD,  48-57 12WD, 58-64 16WD, 65-72 20WD, 73-81 26WD
+```{r}
+pept_msn_norm <- log2(exprs(pept_msn)) %>%
+  as.tibble()
+colnames(pept_msn_norm) <- sprintf( "%02d %02d %05s",  pData(pept_msn)$weeksWD, pData(pept_msn)$age, pData(pept_msn)$pept_tbl_col )
+pept_msn_norm <- pept_msn_norm[,order(names(pept_msn_norm))]
+pept_msn_norm <- pept_msn_norm[,c(40:1,41:81)]
+
+pept_msn1_norm <- log2(exprs(pept_msn1)) %>%
+  as.tibble()
+colnames(pept_msn1_norm) <- sprintf( "%02d %02d %05s",  pData(pept_msn1)$weeksWD, pData(pept_msn1)$age, pData(pept_msn1)$pept_tbl_col )
+pept_msn1_norm <- pept_msn1_norm[,order(names(pept_msn1_norm))]
+pept_msn1_norm <- pept_msn1_norm[,c(40:1,41:81)]
+
+ord <- order( rowMeans( pept_msn_norm[ ,41:72] ) - 
+  rowMeans( pept_msn_norm[ ,73:81] ) )
+ord2 <- order( rowMeans( pept_norm_pool[ ,41:76] ) - 
+  rowMeans( pept_norm_pool[ ,76:81] ) )
+ord3 <- order( rowMeans( pept_msn1_norm[ ,41:72] ) - 
+  rowMeans( pept_msn1_norm[ ,73:81] ) )
+
+max_value=1
+max_value=max(abs(pept_msn_norm),na.rm=TRUE)
+brks <- ( seq(0, 1, length.out=50)[-1] )^1.7
+l <- length(pept_msn_norm[,1])
+
+batches <- as.matrix(mf[,3])
+rownames(batches) <- sprintf( "%02d %02d %05s",  mf$weeksWD, mf$age, mf$pept_tbl_col )
+batches <- as.data.frame(batches)
+
+pept_norm_pool1 <- log2(pept_norm_pool)
+colnames(pept_norm_pool1) <- sprintf( "%02d %02d %05s",  mf$weeksWD, mf$age, mf$pept_tbl_col )
+pept_norm_pool1 <- pept_norm_pool1[,order(colnames(pept_norm_pool1))]
+pept_norm_pool1 <- pept_norm_pool1[,c(40:1,41:81)]
+
+pheatmap( 
+       pept_msn_norm[ ord[1:300], ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+       breaks=max_value*c(-rev(brks),0,brks), na_col = "grey" , annotation_col = batches,
+       show_rownames = F)
+
+pheatmap( 
+       pept_norm_pool1[ ord[1:300], ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+       breaks=7*c(-rev(brks),0,brks), na_col = "grey" , annotation_col = batches)
+```
+
+
+take log 10, perform fit, order coefficients (SD desc(age) left, WD asc(age) right),order by difference WD/SD, plot heatmap
+column 1-14 SD, 15-17 8WD, 18-20 12WD, 21-23 16WD, 24-26 20WD, 27-29 26WD
+```{r}
+pept_msn_norm <- log10(exprs(pept_msn)) %>%
+  as.tibble()
+colnames(pept_msn_norm) <- pData(pept_msn)$pept_tbl_col
+
+mf <- assignment_mice[assignment_mice$sample!="Pool",]
+mf$ageWD <- sprintf( "%02d %02d",  mf$weeksWD, mf$age )
+mm <- model.matrix( ~ ageWD, mf )
+
+fit <- lmFit(pept_msn_norm,mm)
+
+fit_coeff <- fit$coefficients %>%
+  as.tibble() %>%
+  select( starts_with("ageWD") ) %>%
+  rename_all(str_replace, fixed("ageWD"),"" )
+fit_coeff <- cbind( rename_all(select(fit_coeff, contains("00")), paste, "SD",  sep = " "),
+  rename_all(select(fit_coeff, -contains("00")), paste, "WD", sep = " "))
+fit_coeff <- fit_coeff %>%
+  rename_all(str_replace, fixed(" 00"),"" )
+fit_coeff <- cbind(fit_coeff[,14:1],fit_coeff[15:29])
+
+max_value=max(abs(fit_coeff),na.rm=TRUE)
+brks <- ( seq(0, 1, length.out=50)[-1] )^1.7
+
+ord <- order( rowMeans( fit_coeff[ grepl("WD",colnames(fit_coeff)) ] ) - 
+  rowMeans( fit_coeff[ grepl("SD",colnames(fit_coeff)) ] ) )
+ord <- order( rowMeans( - fit_coeff[,16:26]) + rowMeans(fit_coeff[,27:29]))
+
+pheatmap( 
+   fit_coeff[ ord[1:300], ],
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+   breaks=max_value*c(-rev(brks),0,brks), na_col = "grey" )
+
+
+```
+
+plot 2 times 2 samples (all 28 20) against each other
+```{r}
+plot(as.matrix(pept_msn_norm[,70]), as.matrix(pept_msn_norm[,71]),pch=".", asp=1)
+abline(a=0,b=1)
+plot(as.matrix(pept_msn_norm[,71]), as.matrix(pept_msn_norm[,72]),pch=".", asp=1)
+abline(a=0,b=1)
+
+```
+
+Find and mark the samples that were processed differently (SD_24w_M1 = 3 TMT2, SD_26w_M2 = 5 TMT7, SD_28w_M1 = 2 TMT5, WD_4w_20w_M1 = 4 TMT2, WD_6w_20w_M2 = 2 TMT9, WD_8w_20w_M1 = 1 TMT5)
+
+```{r}
+samples <- c("3 TMT2", "5 TMT7", "2 TMT5", "4 TMT2", "2 TMT9", "1 TMT5")
+idx <- match(samples, mf$pept_tbl_col)
+
+mf$processing <- rep("01/24",length(mf$tag_idx))
+mf$processing[idx] <- "01/10"
+mf$processing[mf$age==34] <- "02/12"
+mf$processing[mf$age==32] <- "02/08"
+mf$processing[mf$age==30] <- "02/08"
+mf$processing[mf$age==4] <- "01/22"
+mf$processing[mf$age==6] <- "01/22"
+mf$processing[mf$age==8] <- "01/22"
+mf$processing[mf$age==10] <- "01/22"
+mf$processing[mf$age==12] <- "01/22"
+mf$processing[mf$age==14 & mf$weeksWD==0] <- "01/22"
+mf$processing[mf$age==16 & mf$weeksWD==0] <- "01/22"
+mf$processing[mf$age==18 & mf$weeksWD==0] <- "01/22"
+mf$processing[mf$age==20 & mf$weeksWD==0] <- "01/22"
+mf$processing[mf$age==22 & mf$weeksWD==0] <- "01/22"
+mf$processing[mf$age==12 & mf$weeksWD==8] <- "01/22"
+mf$processing[mf$age==16 & mf$weeksWD==12] <- "01/22"
+mf$processing[mf$age==20 & mf$weeksWD==16] <- "01/22"
+
+mf$ageWD <- sprintf("%02d %02d %s", mf$age, mf$weeksWD, mf$mouse)
+pept_pool_cor <- cor(log2(pept_norm_pool), use = "p")
+```
+
+
+```{r}
+
+ord = order(mf$processing)
+ord2 = order( mf$processing > "01/22", mf$weeksWD, mf$age )
+brks <- ( seq(0, 1, length.out=50)[-1] )^1.7
+rownames(pept_pool_cor) <- sprintf( "%s %02d %02d", mf$diet, mf$age, mf$weeksWD )
+diet <- as.matrix(mf[,12])
+rownames(diet) <- mf$pept_tbl_col
+diet <- as.data.frame(diet)
+
+pheatmap( 
+  pept_pool_cor[ ord,ord ],
+  colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+  breaks=c(-rev(brks),0,brks), na_col = "grey", annotation_col = diet )
+
+pheatmap( 
+  pept_pool_cor[ ord2,ord2 ],
+  colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+  breaks=c(-rev(brks),0,brks), na_col = "grey", annotation_col = diet )
+
+pheatmap( 
+  pept_pool_cor,
+  colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+  breaks=c(-rev(brks),0,brks), na_col = "grey", annotation_col = diet )
+
+```
+
+
+Find and mark the double samples (SD_6w_M3 = 9 TMT2, 9 TMT9; SD_24w_M2 = 2 TMT3, 4 TMT8, SD_34w_M2= 7 TMT4, 7 TMT9; WD_12w_6w_M3 = 8 TMT3, 8 TMT9; WD_12w_8w_M3= 5 TMT2, 6 TMT5; WD_20w_8w_M3 = 6 TMT1, 6 TMT 9)
+```{r}
+samples2 <- c("9 TMT2", "9 TMT9", "2 TMT3", "4 TMT8", "7 TMT4", "7 TMT9", "8 TMT3", "8 TMT9", "5 TMT2", "6 TMT5", "6 TMT1", "6 TMT9")
+idx2 <- match(samples2, mf$pept_tbl_col)
+
+mf$duplicates <- rep("unique",length(mf$tag_idx))
+mf$duplicates[idx2] <- "duplicate"
+
+rownames(pept_pool_cor) <- sprintf( "%02d/%02d/%s", mf$age, mf$weeksWD, mf$mouse)
+ord3 = order(mf$duplicates)
+
+dupl <- as.matrix(mf[,14])
+rownames(dupl) <- mf$pept_tbl_col
+dupl <- as.data.frame(dupl)
+
+pheatmap( 
+  pept_pool_cor[ idx2,idx2 ],
+  colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+  breaks=c(-rev(brks),0,brks), na_col = "grey" )
+
+pheatmap( 
+  pept_pool_cor[ ord2,ord2 ],
+  colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+  breaks=c(-rev(brks),0,brks), na_col = "grey",annotation_col = dupl )
+
+plot(pept_norm_pool[,14],pept_norm_pool[,42],pch=".",asp=1, xlim=c(0,10),ylim=c(0,8), main="24/00/M2")
+abline(a=0,b=1)
+
+```
+
+
+Remove bad/swapped samples & plot correlation heatmap 
+```{r}
+samples_rm <- c("6 TMT7", "6 TMT9","1 TMT5", "6 TMT1", "2 TMT9", "8 TMT7", "4 TMT2", "1 TMT3", "2 TMT7", "5 TMT5", "7 TMT2", "8 TMT4", "3 TMT4", "7 TMT3", "1 TMT8", "5 TMT3", "2 TMT1", "3 TMT9", "7 TMT7", "7 TMT1", "6 TMT8", "2 TMT6", "4 TMT3", "4 TMT5", "5 TMT1", "1 TMT9", "2 TMT3", "3 TMT2", "7 TMT5", "4 TMT6", "1 TMT6", "7 TMT6", "9 TMT1")
+idx_rm <- match(samples_rm,mf$pept_tbl_col)
+
+pept_pool_rm <- log2( pept_norm_pool[,-idx_rm] )
+
+mf_rm <- mf[-idx_rm,]
+ord_rm <- order(sprintf( "%s/%02d", mf_rm$diet, mf_rm$age))
+pept_pool_cor_rm <- cor(pept_pool_rm, use = "p")
+rownames(pept_pool_cor_rm) <- sprintf( "%s %02d %02d", mf_rm$diet, mf_rm$age, mf_rm$weeksWD )
+
+diet_rm <- as.matrix(mf_rm[,12])
+rownames(diet_rm) <- mf_rm$pept_tbl_col
+diet_rm <- as.data.frame(diet_rm)
+
+pheatmap( 
+  pept_pool_cor_rm[ ord_rm,ord_rm ],
+  colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+  breaks=c(-rev(brks),0,brks), na_col = "grey" )
+
+pheatmap( 
+  pept_pool_cor_rm,
+  colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+  breaks=c(-rev(brks),0,brks), na_col = "grey", annotation_col = diet_rm )
+```
+
+
+calculate p values for first 10000 peptides and compare them for weeksWD and age
+```{r}
+p_values_weeksWD=rep(NA,10000)
+p_values_age=rep(NA,10000)
+
+for(i in 1:10000){
+ if (sum(is.na(pept_pool_rm[i,]))<=44){
+  y <- as.matrix(pept_pool_rm)[i,]
+
+  a=anova( 
+    lm( y ~ factor(age) + factor(weeksWD), mf_rm))
+  p_values_weeksWD[i]=a$`Pr(>F)`[2]
+  p_values_age[i]=a$`Pr(>F)`[1]
+  }
+}
+
+mean(p_values_weeksWD,na.rm=T)
+mean(p_values_age,na.rm=T)
+median(p_values_weeksWD,na.rm=T)
+median(p_values_age,na.rm=T)
+
+hist(p_values_weeksWD, breaks=50, col=rgb(0,0,1,0.5))
+hist(p_values_age, breaks=50, col=rgb(0,1,1,0.5), add=T)
+legend("topright", c( "weeksWD","age"), fill=c( rgb(0,0,1,0.5), rgb(0,0.8,1,0.7)))
+```
+
+Create a list with the peptides with the highest covergence depending on the weeks on WD
+```{r}
+mm_rm=model.matrix( ~  factor(age) + factor(weeksWD), mf_rm )
+fit_rm=lmFit(pept_pool_rm,mm_rm)
+
+coeff_rm <- as.data.frame( fit_rm$coefficients[,16:20] ) %>%
+  as.matrix() %>%
+  t()
+
+a <- c( 8,12,16,20,26)
+
+coeff_cov_rm <- cov(coeff_rm,a)
+
+pept_cov_rm <- tibble( index = peptides$index, cov = as.vector(coeff_cov_rm), Protein_names = peptides$`Protein names`, Gene_names = peptides$`Gene names` ) %>%
+  arrange( desc(cov) )
+pept_cov_rm[1:15,]
+```
+
+Find peptides(and corresponding genes) with the highest and lowest LFC
+```{r}
+contrastvector=cbind( c(rep(0,15),rep(1/5,5)) )
+fit2_rm <- contrasts.fit(eBayes(fit_rm),contrastvector)
+
+a=rownames(topTable(fit2_rm, number=40000, lfc=0.9))
+a=as.numeric(a)
+pept_rm_filtered=peptides[a,]
+pept_rm_filtered=cbind(pept_rm_filtered,topTable(fit2_rm, number=40000, lfc=0.9))
+
+genenames_up_rm=pept_rm_filtered[pept_rm_filtered$logFC>0,"Gene names"]
+write.table(unique(genenames_up_rm),"genenames_up_rm",row.names=FALSE,quote=FALSE)
+
+genenames_down_rm=pept_rm_filtered[pept_rm_filtered$logFC<0,"Gene names"][1:2000]
+write.table(unique(genenames_down_rm),"genenames_down_rm",row.names=FALSE,quote=FALSE)
+```
+
+Get indices of the peptides with highest and lowest logFC and plot them
+```{r}
+idx_down <- as.numeric(arrange(pept_rm_filtered,logFC)[1:20,1])
+idx_up <- arrange(pept_rm_filtered,desc(logFC))[1:20,1]
+
+mf_rm$ageWD <- sprintf( "%02d %02d",  mf_rm$weeksWD, mf_rm$age )
+brks <- ( seq(0, 1, length.out=50)[-1] )^1.7
+
+pdf(file="C:\\Users\\Annika\\ZMBH\\Heatmap_peptides_down_after_rm.pdf")
+for (i in 1:length(idx_down)) {
+  if ( sum(is.na(as.matrix(pept_pool_rm)[idx_down[i],])) < 44 ) {
+    y <- as.matrix(pept_pool_rm)[idx_down[i],]
+    peptide_beta=lm( y ~ ageWD, mf_rm ) 
+    
+    table<-peptide_beta$coefficients %>%
+      as.data.frame() %>%
+      rownames_to_column(var = "age") %>%
+      filter( str_detect(age,"ageWD") ) %>%
+      mutate( age=str_replace(age,fixed("ageWD"),"") ) %>%
+      mutate( weeksWD=str_extract(age,"(?<= )\\d\\d?") ) %>%
+      mutate( age=str_extract(age,"\\d?\\d(?= )") ) %>% 
+      mutate( weeksWD = as.integer(weeksWD) ) %>%
+      mutate( age = as.integer(age) )
+    table<-rename(table,coeff=.)
+    
+    table$age=factor(table$age,levels=seq(2,34,2))
+    table_heatmap=spread(table,weeksWD,coeff,drop=FALSE) %>%
+      column_to_rownames(var="age") %>% 
+      as.matrix()
+    
+    max_value=max(table_heatmap,na.rm=T)
+    pheatmap(table_heatmap, colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, breaks=max_value*c(-rev(brks),0,brks), na_col = "grey")
+    
+  }
+}
+dev.off()
+```
+
+
+```{r}
+ord <- order( rowMeans( pept_pool_rm[ ,mf_rm$weeksWD==26] ) - 
+  rowMeans( pept_pool_rm[ ,mf_rm$weeksWD!=26&mf_rm$weeksWD!=0] ) )
+ord_col <- order(mf_rm$ageWD)
+col<-mf_rm$ageWD[ord_col]
+
+max_value=4
+brks <- ( seq(0, 1, length.out=50)[-1] )^3
+
+pheatmap( 
+       pept_pool_rm[ ord[1:300], ord_col],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+        na_col = "grey", labels_col = col )
+```
+
+
+```{r}
+dens <- apply( scale( log2( pept_norm_pool ) ), 2, function(x) density( x, na.rm=TRUE, bw=0.1, from=-5, to=5, n=1000 )$y )
+matplot( seq(-5,5,length.out=1000), dens, type="l", lty=1, col=as.integer(factor(mf$processing)) )
+```
+
+
+```{r}
+mm_p=model.matrix( ~ factor(ageWD) + processing, mf )
+fit_p=lmFit(log2(pept_norm_pool),mm_p)
+
+coeff_p <- as.data.frame( fit_p$coefficients ) %>%
+  as.matrix()
+
+```
+
+
+```{r}
+ord2 <- order( rowMeans( coeff_p[ ,16:27] ) - 
+  rowMeans( coeff_p[ ,28:30] ) )
+ord3 <- order( rowMeans( coeff_p[ ,16:24] ) - 
+  rowMeans( coeff_p[ ,25:30] ) )
+
+max_value=max(abs(coeff_p),na.rm=TRUE)
+brks <- ( seq(0, 1, length.out=50)[-1] )^1.7
+
+pheatmap( 
+       coeff_p[ ord2[1:100], 16:30 ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+       breaks=max_value*c(-rev(brks),0,brks), na_col = "grey" ,  show_rownames = F)
+
+pheatmap( 
+       coeff_p[ ord3[1:100], 16:30 ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+       breaks=max_value*c(-rev(brks),0,brks), na_col = "grey" ,  show_rownames = F)
+
+```
+
+
+```{r}
+pept_msn_norm <- log2(exprs(pept_msn)) %>%
+  as.tibble()
+colnames(pept_msn_norm) <- sprintf( "%05s", pData(pept_msn)$pept_tbl_col )
+mf$ageWD <- sprintf("%02d %02d", mf$weeksWD, mf$age)
+mm_msn=model.matrix( ~ factor(ageWD), mf )
+fit_msn=lmFit(pept_msn_norm,mm_msn)
+
+coeff_msn <- as.data.frame( fit_msn$coefficients ) %>%
+  as.matrix()
+
+```
+
+
+```{r}
+ord_msn <- order( rowMeans( coeff_msn[ ,16:27] ) - 
+  rowMeans( coeff_msn[ ,28:30] ) )
+ord_msn2 <- order( rowMeans( coeff_msn[ ,16:24] ) - 
+  rowMeans( coeff_msn[ ,25:30] ) )
+
+max_value=max(abs(coeff_msn),na.rm=TRUE)
+brks <- ( seq(0, 1, length.out=50)[-1] )^1.7
+
+pheatmap( 
+       coeff_msn[ ord_msn[21:100], 16:30 ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+       breaks=max_value*c(-rev(brks),0,brks), na_col = "grey" ,  show_rownames = F)
+pheatmap( 
+       coeff_msn[ ord_msn2[21:100], 16:30 ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, 
+       breaks=max_value*c(-rev(brks),0,brks), na_col = "grey" ,  show_rownames = F)
+```
+
